@@ -27,8 +27,6 @@ def extrair_campos_selecionados(payload_front: dict) -> dict:
         
 
 
-
-
 # Teste Local
 # if __name__ == "__main__":
 #     json_teste = {

@@ -1,0 +1,64 @@
+import os
+import json
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.output_parsers import StrOutputParser
+from prompts.templates import MAPA_TEMPLATES
+from utils.logger import configurar_logger
+from config import GOOGLE_API_KEY 
+
+logger = configurar_logger(__name__)
+
+def gerar_analise_ia(nome_campo: str, dados_campo: dict) -> str:
+    """
+    Recebe os dados de um campo específico, seleciona o template adequado,
+    chama o Gemini via LangChain e retorna a análise em Markdown.
+    """
+    logger.info(f"Iniciando geracao de analise via IA para o campo: {nome_campo}")
+    
+    try:
+        llm = ChatGoogleGenerativeAI(
+            model="gemini-2.5-flash", # Mudamos aqui para a versão mais estável
+            temperature=0.2,
+            api_key=GOOGLE_API_KEY
+        )
+        
+        prompt = MAPA_TEMPLATES.get(nome_campo, MAPA_TEMPLATES["default"]) # Se o campo passado não está no mapa ele passar o default
+        
+        chain = prompt | llm | StrOutputParser()
+        
+        dados_formatados = json.dumps(dados_campo, indent=2, ensure_ascii=False)
+        nome_formatado = nome_campo.replace("_", " ").title()
+        
+        logger.debug(f"Enviando payload para o Gemini (Campo: {nome_formatado})...")
+        resposta = chain.invoke({
+            "campo": nome_formatado,
+            "dados": dados_formatados
+        })
+        
+        logger.info(f"Analise gerada com sucesso para o campo: {nome_campo}")
+        return resposta
+        
+    except Exception as e:
+        logger.error(f"Erro ao gerar analise para {nome_campo}: {str(e)}")
+        return f"**Erro na análise de {nome_campo}:** Não foi possível processar os dados neste momento."
+
+# ==========================================
+# CRITÉRIO DE SUCESSO: TESTE LOCAL
+# ==========================================
+if __name__ == "__main__":
+    # Importante: O seu .env precisa ter a chave real do Gemini agora!
+    
+    # Simulando um dado extraído do front-end pelo json_parser
+    nome_teste = "analise_icp_l6m"
+    dados_teste = {
+        "usuarios_ativos_l6m": 15420,
+        "ticket_medio": "R$ 450,00",
+        "taxa_conversao_upsell": "12%",
+        "principal_ofensor_churn": "Falta de engajamento no primeiro mes"
+    }
+    
+    print("\n--- INICIANDO CHAMADA AO GEMINI ---")
+    resultado_markdown = gerar_analise_ia(nome_teste, dados_teste)
+    
+    print("\n--- RETORNO DA IA (FORMATO MARKDOWN) ---")
+    print(resultado_markdown)

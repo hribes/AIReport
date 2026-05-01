@@ -1,0 +1,14 @@
+.env
+.venv/
+
+# Arquivos temporarios
+temp/
+*.pdf
+*.png
+*.jpg
+*.jpeg
+
+# Arquivos compilados que o python gera automaticamente
+__pycache__/
+*.py[cod]
+*$py.class

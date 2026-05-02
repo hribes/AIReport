@@ -1,4 +1,4 @@
-# RelatorioAI: Motor de Inteligência Executiva
+# RelatAI: Motor de Inteligência Executiva
 
 ## Sobre o Projeto
 O **RelatorioAI** é um pipeline analítico autônomo focado em Decision Science e automação de relatórios. Este projeto pessoal nasceu da necessidade de transformar dados brutos (JSON) em inteligência acionável sem intervenção manual. 

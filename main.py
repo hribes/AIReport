@@ -1,20 +1,107 @@
 import os
-import time  
+import time
+import json
+import shutil
 from utils.logger import configurar_logger
 from services.gemini_service import gerar_analise_ia, gerar_resumo_geral, decidir_tipo_grafico_ia
 from services.chart_service import processar_grafico_dinamico
 from services.pdf_service import gerar_pdf_relatorio
+from utils.base64_encoder import codificar_pdf_para_base64
 
 logger = configurar_logger("main")
 
-def executar_motor_inteligencia():
-    tempo_inicio = time.time()
-    print("\n" + "="*50)
-    print("INICIANDO MOTOR DE INTELIGÊNCIA EXECUTIVA")
-    print("="*50 + "\n")
+def limpar_arquivos_temporarios():
+    """Deleta as pastas temporárias onde imagens e PDFs foram salvos."""
+    pastas_para_limpar = ["temp_images"] #por enquanto irei manter a pasta temporária do relatorio
+    
+    for pasta in pastas_para_limpar:
+        if os.path.exists(pasta):
+            try:
+                shutil.rmtree(pasta) 
+                logger.debug(f"Limpeza concluída: '{pasta}' apagada.")
+            except Exception as e:
+                logger.warning(f"Não foi possível limpar a pasta '{pasta}': {e}")
 
-    # 1. Simulando os dados que viriam do seu banco/JSON filtrado
-    dados_filtrados = {
+def executar_motor_inteligencia(payload_entrada: dict) -> str:
+    """
+    Recebe os dados brutos, orquestra a IA, gera o PDF, converte para Base64 
+    e retorna um JSON de resposta estrito para o sistema chamador.
+    """
+    tempo_inicio = time.time()
+    logger.info("Iniciando Motor de Inteligência Executiva...")
+
+    resposta_final = {
+        "status": "erro",
+        "mensagem": "",
+        "tempo_execucao_segundos": 0,
+        "pdf_base64": ""
+    }
+
+    try:
+        conteudo_secoes = []
+        textos_para_resumo = ""
+
+        for campo, dados in payload_entrada.items():
+            logger.info(f"Processando campo bruto: {campo}...")
+            
+            decisao_visual_ia = decidir_tipo_grafico_ia(campo, dados)
+            titulo_inteligente = decisao_visual_ia.get("titulo_sugerido", campo)
+            logger.info(f"A IA decidiu: Gráfico de '{decisao_visual_ia.get('tipo_grafico')}' com título '{titulo_inteligente}'")
+
+            texto_md = gerar_analise_ia(campo, dados)
+            caminho_img = processar_grafico_dinamico(dados, decisao_visual_ia)
+            
+            conteudo_secoes.append({
+                "titulo": titulo_inteligente,
+                "texto_md": texto_md,
+                "imagem": caminho_img
+            })
+            
+            if not texto_md.startswith("**Erro"):
+                textos_para_resumo += f"\n\n--- Seção: {titulo_inteligente} ---\n{texto_md}"
+
+            logger.info("Aguardando 10 segundos de segurança para a API...") #Como a API é gratuita tem uma quantidade limite de requisições por minuto
+            time.sleep(10)
+
+        logger.info("Analisando textos para criar o Sumário Executivo...")
+        resumo_geral_md = gerar_resumo_geral(textos_para_resumo)
+
+        nome_arquivo = "Relatorio_Temporario.pdf"
+        caminho_final = gerar_pdf_relatorio(resumo_geral_md, conteudo_secoes, nome_arquivo)
+
+        if not caminho_final:
+            raise Exception("A geração física do PDF falhou internamente.")
+
+        logger.info("Codificando documento para Base64...")
+        pdf_base64_string = codificar_pdf_para_base64(caminho_final)
+        
+        if not pdf_base64_string:
+            raise Exception("Falha na conversão para Base64.")
+
+        resposta_final["status"] = "sucesso"
+        resposta_final["mensagem"] = "Relatório executivo gerado e convertido com sucesso."
+        resposta_final["pdf_base64"] = pdf_base64_string
+
+    except Exception as e:
+        logger.error(f"FALHA CRÍTICA NO PIPELINE: {str(e)}")
+        resposta_final["mensagem"] = str(e)
+    
+    finally:
+        logger.info("Limpando arquivos temporários do disco...")
+        limpar_arquivos_temporarios()
+        
+        duracao_total = time.time() - tempo_inicio
+        resposta_final["tempo_execucao_segundos"] = round(duracao_total, 2)
+        logger.info(f"Processo finalizado em {resposta_final['tempo_execucao_segundos']}s")
+
+        return json.dumps(resposta_final, ensure_ascii=False, indent=2)
+
+# ==========================================
+# ÁREA DE TESTE DO MICROSERVIÇO
+# ==========================================
+if __name__ == "__main__":
+    # O JSON inicial (Payload) que viria do seu banco ou webhook
+    json_inicial_simulado = {
         "analise_icp_l6m": {
             "usuarios_ativos": 15420, "ticket_medio": 450, "taxa_upsell": "12%", "churn_1m": "15%"
         },
@@ -26,73 +113,21 @@ def executar_motor_inteligencia():
         }
     }
 
-    # Nomes bonitos para as seções do PDF baseados nas chaves
-    titulos_map = {
-        "analise_icp_l6m": "Análise de ICP e Retenção",
-        "volume_por_ativo": "Distribuição de Volume por Ativo",
-        "historico_ltv_mensal": "Evolução do Lifetime Value (LTV)"
-    }
+    print("\n" + "="*50)
+    print("INICIANDO MOTOR DE INTELIGÊNCIA EXECUTIVA")
+    print("="*50 + "\n")
 
-    conteudo_secoes = []
-    textos_para_resumo = ""
-
-    # 2. Loop Principal (Processando cada indicador)
-    for campo, dados in dados_filtrados.items():
-        print(f"\nPROCESSANDO O CAMPO BRUTO: {campo}...")
+    # A variável 'saida_json_string' agora guarda a resposta da nossa API
+    saida_json_string = executar_motor_inteligencia(json_inicial_simulado)
+    
+    # Vamos tratar o print apenas para não poluir o terminal com os milhares de caracteres do Base64
+    saida_dict = json.loads(saida_json_string)
+    if saida_dict["status"] == "sucesso":
+        # Trunca o base64 só para exibição na tela
+        preview_base64 = saida_dict["pdf_base64"][:150] + "... [TRUNCADO PARA LEITURA] ..."
+        saida_dict["pdf_base64"] = preview_base64
         
-        # A. Consulta o Oráculo: Qual gráfico usar? Qual o título?
-        decisao_visual_ia = decidir_tipo_grafico_ia(campo, dados)
-        titulo_inteligente = decisao_visual_ia.get("titulo_sugerido", campo)
-        
-        print(f"   ↳ A IA decidiu: Gráfico de '{decisao_visual_ia.get('tipo_grafico')}' com título '{titulo_inteligente}'")
-
-        # B. Pede a análise detalhada para a IA
-        texto_md = gerar_analise_ia(campo, dados)
-        
-        # C. Gera o gráfico passando a decisão da IA para o roteador dinâmico
-        caminho_img = processar_grafico_dinamico(dados, decisao_visual_ia)
-        
-        # D. Guarda na lista do PDF e no blocão de texto para o resumo
-        conteudo_secoes.append({
-            "titulo": titulo_inteligente,
-            "texto_md": texto_md,
-            "imagem": caminho_img
-        })
-        
-        if not texto_md.startswith("**Erro"):
-            textos_para_resumo += f"\n\n--- Seção: {titulo_inteligente} ---\n{texto_md}"
-
-        print("⏳ Aguardando 10 segundos para não sobrecarregar a API gratuita...")
-        time.sleep(10)
-
-    # 3. Geração do Resumo Executivo (A Síntese Transversal)
-    print("\n🧠 Analisando todos os textos para criar o Sumário Executivo...")
-    resumo_geral_md = gerar_resumo_geral(textos_para_resumo)
-
-    # 4. Compilação do Documento
-    print("\n📄 Compilando PDF Enterprise...")
-    nome_arquivo = "Relatorio_Diretoria_Automatizado.pdf"
-    caminho_final = gerar_pdf_relatorio(resumo_geral_md, conteudo_secoes, nome_arquivo)
-
-    if caminho_final:
-        tempo_fim = time.time() 
-        duracao_total = tempo_fim - tempo_inicio
-        
-        # Transformando os segundos em algo legível (ex: 1m 12s)
-        minutos = int(duracao_total // 60)
-        segundos = int(duracao_total % 60)
-        if minutos > 0:
-            tempo_formatado = f"{minutos}m {segundos}s"
-        else:
-            tempo_formatado = f"{duracao_total:.1f}s"
-
-        logger.info(f"Processo de Inteligencia finalizado. Tempo de execucao: {tempo_formatado}")
-
-        print("\n")
-        print(f"SUCESSO! Relatório gerado em: {caminho_final}")
-        print(f"Tempo total de processamento: {tempo_formatado}")
-    else:
-        print("\n❌ Falha na montagem final do PDF.")
-
-if __name__ == "__main__":
-    executar_motor_inteligencia()
+    print("\n" + "="*50)
+    print("SAÍDA DO SISTEMA (JSON DE RESPOSTA):")
+    print("="*50)
+    print(json.dumps(saida_dict, ensure_ascii=False, indent=4))

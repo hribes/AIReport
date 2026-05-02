@@ -17,11 +17,10 @@ def gerar_resumo_geral(textos_detalhados_agrupados: str) -> str:
     try:
         llm = ChatGoogleGenerativeAI(
             model="gemini-2.5-flash", 
-            temperature=0.4, # Temperatura um pouco maior para criatividade na síntese
+            temperature=0.4, 
             api_key=GOOGLE_API_KEY
         )
         
-        # Junta o System Prompt com o Template de Resumo
         prompt_completo = _contexto_base + "\n\n" + TEMPLATE_RESUMO_GERAL
         prompt = PromptTemplate(template=prompt_completo, input_variables=["textos_detalhados_agrupados"])
         
@@ -42,12 +41,12 @@ def gerar_analise_ia(nome_campo: str, dados_campo: dict) -> str:
     
     try:
         llm = ChatGoogleGenerativeAI(
-            model="gemini-2.5-flash", # Mudamos aqui para a versão mais estável
+            model="gemini-2.5-flash",
             temperature=0.2,
             api_key=GOOGLE_API_KEY
         )
         
-        prompt = MAPA_TEMPLATES.get(nome_campo, MAPA_TEMPLATES["default"]) # Se o campo passado não está no mapa ele passar o default
+        prompt = MAPA_TEMPLATES.get(nome_campo, MAPA_TEMPLATES["default"])
         
         chain = prompt | llm | StrOutputParser()
         
@@ -72,8 +71,8 @@ def decidir_tipo_grafico_ia(nome_campo: str, dados: dict) -> dict:
     logger.info(f"Consultando IA para decidir tipo de grafico para: {nome_campo}")
     try:
         llm = ChatGoogleGenerativeAI(
-            model="gemini-2.5-flash", # USE O NOME QUE FUNCIONOU NA SUA CHAVE!
-            temperature=0.0, # Temperatura ZERO para evitar que a IA invente formatos de JSON
+            model="gemini-2.5-flash", 
+            temperature=0.0, 
             api_key=GOOGLE_API_KEY
         )
         
@@ -82,7 +81,6 @@ def decidir_tipo_grafico_ia(nome_campo: str, dados: dict) -> dict:
             input_variables=["nome_campo", "dados"]
         )
         
-        # O JsonOutputParser converte o texto da IA direto para um dicionário Python
         chain = prompt | llm | JsonOutputParser()
         
         resposta_json = chain.invoke({"nome_campo": nome_campo, "dados": dados})
@@ -92,23 +90,3 @@ def decidir_tipo_grafico_ia(nome_campo: str, dados: dict) -> dict:
         logger.error(f"Erro na IA ao classificar grafico para {nome_campo}: {e}")
         # Fallback de segurança: se a IA falhar, mandamos pular para não quebrar o PDF
         return {"tipo_grafico": "pular", "titulo_sugerido": "Erro", "eixo_x": "", "eixo_y": ""}
-# ==========================================
-# CRITÉRIO DE SUCESSO: TESTE LOCAL
-# ==========================================
-if __name__ == "__main__":
-    # Importante: O seu .env precisa ter a chave real do Gemini agora!
-    
-    # Simulando um dado extraído do front-end pelo json_parser
-    nome_teste = "analise_icp_l6m"
-    dados_teste = {
-        "usuarios_ativos_l6m": 15420,
-        "ticket_medio": "R$ 450,00",
-        "taxa_conversao_upsell": "12%",
-        "principal_ofensor_churn": "Falta de engajamento no primeiro mes"
-    }
-    
-    print("\n--- INICIANDO CHAMADA AO GEMINI ---")
-    resultado_markdown = gerar_analise_ia(nome_teste, dados_teste)
-    
-    print("\n--- RETORNO DA IA (FORMATO MARKDOWN) ---")
-    print(resultado_markdown)

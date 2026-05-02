@@ -111,7 +111,7 @@ def gerar_grafico_pizza(dados: dict, titulo: str, **kwargs) -> str:
         for autotext in autotexts:
             autotext.set_fontsize(11)
             autotext.set_fontweight('bold')
-            autotext.set_color('#333333') # Um cinza escuro para dar contraste
+            autotext.set_color('#333333') 
         
         ax.legend(wedges, labels,
                   title="Ativos",
@@ -137,7 +137,7 @@ def pular_grafico(dados: dict, titulo: str, **kwargs) -> str:
     return ""
 
 
-# Agora mapeamos o TIPO de gráfico (retornado pela IA) para a função que o desenha
+# mapeamento do tipo de grafico retornado pela AI
 MAPA_FUNCOES_GRAFICOS = {
     "linha": gerar_grafico_linha,
     "pizza": gerar_grafico_pizza,
@@ -164,36 +164,3 @@ def processar_grafico_dinamico(dados: dict, decisao_ia: dict) -> str:
         return funcao_plot(dados=dados, titulo=titulo)
     else:
         return funcao_plot(dados=dados, titulo=titulo, eixo_x=eixo_x, eixo_y=eixo_y)
-
-# ==========================================
-# CRITÉRIO DE SUCESSO: TESTE LOCAL COM ROTEADOR
-# ==========================================
-# if __name__ == "__main__":
-#     print("\n--- INICIANDO TESTE DO ROTEADOR DE GRÁFICOS ---")
-
-#     # Simulando o dicionário de campos ativos que viria do json_parser
-#     payload_simulado = {
-#         "usuarios_ativos_l6m": {
-#             "Jan": 1200, "Fev": 1350, "Mar": 1500, "Abr": 1450, "Mai": 1600, "Jun": 1750
-#         },
-#         "historico_ltv_mensal": {
-#             "Jan": 450, "Fev": 465, "Mar": 480, "Abr": 475, "Mai": 490, "Jun": 510
-#         },
-#         "volume_por_ativo": {
-#             "BTC": 55, "ETH": 25, "SOL": 10, "USDC": 7, "Outros": 3
-#         }
-#     }
-
-#     # O loop que simula o fluxo do seu orquestrador principal
-#     for campo, dados in payload_simulado.items():
-#         print(f"\nProcessando requisição para: {campo}")
-        
-#         # Chama APENAS o roteador, ele decide o resto
-#         caminho_imagem = processar_grafico_para_campo(nome_campo=campo, dados=dados)
-        
-#         if caminho_imagem:
-#             print(f"✅ Sucesso! Gráfico salvo em: {caminho_imagem}")
-#         else:
-#             print(f"❌ Falha ao gerar o gráfico para {campo}.")
-
-#     print("\nTeste concluído! Abra a pasta 'temp_images' para ver os 3 gráficos gerados (Barras, Linha e Donut).")

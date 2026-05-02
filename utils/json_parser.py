@@ -25,33 +25,3 @@ def extrair_campos_selecionados(payload_front: dict) -> dict:
         logger.error(f"Erro ao extrair campos do JSON: {str(e)}")
         raise
         
-
-
-# Teste Local
-# if __name__ == "__main__":
-#     json_teste = {
-#         "vendas_mensais": {
-#             "selected": 1, 
-#             "data": {"mes": "Janeiro", "valor": 50000}
-#         },
-#         "taxa_churn": {
-#             "selected": 0, 
-#             "data": None
-#         },
-#         "custo_aquisicao": {
-#             "selected": 1, 
-#             "data": {"campanha": "Google Ads", "custo": 1500}
-#         },
-#         "campo_sem_data_mas_selecionado": {
-#             "selected": 1
-#         }
-#     }
-
-#     resultado_limpo = extrair_campos_selecionados(json_teste)
-
-#     import json
-#     print("\n--- JSON ORIGINAL (FRONT-END) ---")
-#     print(f"Total de campos recebidos: {len(json_teste)}")
-    
-#     print("\n--- JSON LIMPO (PRONTO PARA A IA) ---")
-#     print(json.dumps(resultado_limpo, indent=4, ensure_ascii=False))

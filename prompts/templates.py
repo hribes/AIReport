@@ -100,10 +100,8 @@ Com base APENAS nos textos acima, crie um resumo de ALTO NÍVEL para a primeira 
 
 
 # Junção da base (contexto) com os por campos
-# O ChatPromptTemplate.from_messages junta o Sistema com o Humano de forma estruturada.
 
 MAPA_TEMPLATES = {
-    # Mapeie o nome que vem do front-end com a combinação correta de prompts
     "receita_mensal": ChatPromptTemplate.from_messages([prompt_sistema, prompt_receita]),
     "ticket_medio_l6m": ChatPromptTemplate.from_messages([prompt_sistema, prompt_receita]),
     

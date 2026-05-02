@@ -113,10 +113,31 @@ def gerar_pdf_relatorio(resumo_geral_md: str, conteudo_secoes: list, nome_arquiv
         pdf.ln(8)
 
         # Imagem (Gráfico)
+        # Imagem (Gráfico Dinâmico e Responsivo)
         if caminho_imagem and os.path.exists(caminho_imagem):
-            largura_imagem = pdf.epw * 0.8 
-            x_centro = (210 - largura_imagem) / 2
-            pdf.image(caminho_imagem, x=x_centro, w=largura_imagem)
+            # 1. Calcula o espaço restante na página atual (Altura total - Margem Inferior - Posição Y Atual)
+            espaco_restante_y = (pdf.h - pdf.b_margin) - pdf.get_y()
+            
+            # Define o tamanho ideal que gostaríamos que o gráfico tivesse (80% da largura da folha)
+            largura_ideal = pdf.epw * 0.8
+            x_centro = (210 - largura_ideal) / 2
+            
+            # 2. A Regra Dinâmica:
+            # Se sobrou menos de 60mm (6cm), a imagem vai ficar muito esmagada.
+            # É melhor quebrar a página e desenhar ela bonita e grande do outro lado.
+            if espaco_restante_y < 60:
+                logger.debug("Pouco espaço na página. Movendo gráfico para a próxima.")
+                pdf.add_page()
+                # Na nova página, limitamos a imagem a ocupar no máximo metade da altura
+                pdf.image(caminho_imagem, x=x_centro, w=largura_ideal, h=pdf.eph * 0.5, keep_aspect_ratio=True)
+            else:
+                # 3. Se sobrou espaço suficiente, forçamos a imagem a caber no buraco exato que sobrou, 
+                # deixando 10mm de respiro em baixo.
+                logger.debug("Espaço suficiente. Ajustando imagem na mesma página.")
+                altura_permitida = espaco_restante_y - 10
+                # O keep_aspect_ratio=True impede que o gráfico fique "esticado" ou deformado
+                pdf.image(caminho_imagem, x=x_centro, w=largura_ideal, h=altura_permitida, keep_aspect_ratio=True)
+            
             pdf.ln(10)
 
     # ---------------------------------------------------------

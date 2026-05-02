@@ -57,7 +57,22 @@ Escreva sua análise executiva:
 """
 prompt_generico = HumanMessagePromptTemplate.from_template(_template_generico)
 
+TEMPLATE_RESUMO_GERAL = """
+Você é o Chief Revenue Officer (CRO) da empresa. Sua tarefa é ler as análises detalhadas de diferentes KPIs e criar um **Resumo Executivo Transversal** para o CEO.
 
+Aqui estão as análises detalhadas de cada área:
+---
+{textos_detalhados_agrupados}
+---
+
+Com base APENAS nos textos acima, crie um resumo de ALTO NÍVEL para a primeira página do relatório, seguindo estas diretrizes:
+
+1. **Tom de Voz:** Extremamente direto, estratégico e focado em receita/retenção. Sem introduções longas.
+2. **Estrutura:**
+   - Um parágrafo inicial de 3 linhas com a "Manchete do Mês" (a conclusão mais importante de todas).
+   - Um bloco chamado "**Destaques Operacionais (Pontos de Atenção)**" com 3 bullet points sobre os maiores problemas ou oportunidades urgentes encontrados nas análises.
+3. **Restrição:** NÃO invente dados novos e NÃO repita todos os números. Foque no significado estratégico do conjunto. Responda em Markdown limpo.
+"""
 
 
 # Junção da base (contexto) com os por campos

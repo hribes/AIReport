@@ -131,13 +131,17 @@ def gerar_grafico_pizza(dados: dict, titulo: str, **kwargs) -> str:
         plt.close()
         return ""
 
+def pular_grafico(dados: dict, titulo: str, **kwargs) -> str:
+    """Retorna uma string vazia para campos que são apenas texto/KPIs."""
+    logger.info(f"Pulando geracao de grafico para: {titulo} (Campo apenas de texto)")
+    return ""
 
 
-MAPA_GRAFICOS = { #PRECISO FAZER O MAPEAMENTO CORRETO AQUI AINDA
+MAPA_GRAFICOS = {
+    "analise_icp_l6m": (pular_grafico, "KPIs de Retenção", "", ""), # Adicione esta linha
     "historico_ltv_mensal": (gerar_grafico_linha, "Evolução do LTV (L6M)", "Mês", "LTV (R$)"),
     "volume_por_ativo": (gerar_grafico_pizza, "Distribuição de Volume por Ativo", "", ""),
     "usuarios_ativos_l6m": (gerar_grafico_barras, "Usuários Ativos (L6M)", "Mês", "Usuários"),
-    # Fallback genérico
     "default": (gerar_grafico_barras, "Análise de Dados", "Categorias", "Valores")
 }
 

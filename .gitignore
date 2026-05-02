@@ -16,5 +16,5 @@ __pycache__/
 paraMeOrganizar.txt
 
 logs/
-*.log
 temp_images/
+relatorios_gerados/

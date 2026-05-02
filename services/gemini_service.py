@@ -2,11 +2,36 @@ import os
 import json
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import PromptTemplate
 from prompts.templates import MAPA_TEMPLATES
 from utils.logger import configurar_logger
 from config import GOOGLE_API_KEY 
+from prompts.templates import MAPA_TEMPLATES, _contexto_base, TEMPLATE_RESUMO_GERAL
+
 
 logger = configurar_logger(__name__)
+
+def gerar_resumo_geral(textos_detalhados_agrupados: str) -> str:
+    """Usa a IA para ler todas as análises geradas e criar um sumário executivo."""
+    logger.info("Solicitando Resumo Executivo Transversal para a IA...")
+    try:
+        llm = ChatGoogleGenerativeAI(
+            model="gemini-2.5-flash", 
+            temperature=0.4, # Temperatura um pouco maior para criatividade na síntese
+            api_key=GOOGLE_API_KEY
+        )
+        
+        # Junta o System Prompt com o Template de Resumo
+        prompt_completo = _contexto_base + "\n\n" + TEMPLATE_RESUMO_GERAL
+        prompt = PromptTemplate(template=prompt_completo, input_variables=["textos_detalhados_agrupados"])
+        
+        chain = prompt | llm | StrOutputParser()
+        
+        resposta = chain.invoke({"textos_detalhados_agrupados": textos_detalhados_agrupados})
+        return resposta
+    except Exception as e:
+        logger.error(f"Erro ao gerar resumo geral via IA: {str(e)}")
+        return "**Erro:** Não foi possível gerar o resumo executivo neste momento."
 
 def gerar_analise_ia(nome_campo: str, dados_campo: dict) -> str:
     """

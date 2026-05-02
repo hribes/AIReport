@@ -137,23 +137,30 @@ def pular_grafico(dados: dict, titulo: str, **kwargs) -> str:
     return ""
 
 
-MAPA_GRAFICOS = {
-    "analise_icp_l6m": (pular_grafico, "KPIs de Retenção", "", ""), # Adicione esta linha
-    "historico_ltv_mensal": (gerar_grafico_linha, "Evolução do LTV (L6M)", "Mês", "LTV (R$)"),
-    "volume_por_ativo": (gerar_grafico_pizza, "Distribuição de Volume por Ativo", "", ""),
-    "usuarios_ativos_l6m": (gerar_grafico_barras, "Usuários Ativos (L6M)", "Mês", "Usuários"),
-    "default": (gerar_grafico_barras, "Análise de Dados", "Categorias", "Valores")
+# Agora mapeamos o TIPO de gráfico (retornado pela IA) para a função que o desenha
+MAPA_FUNCOES_GRAFICOS = {
+    "linha": gerar_grafico_linha,
+    "pizza": gerar_grafico_pizza,
+    "barras": gerar_grafico_barras,
+    "pular": pular_grafico
 }
 
-def processar_grafico_para_campo(nome_campo: str, dados: dict) -> str:
+def processar_grafico_dinamico(dados: dict, decisao_ia: dict) -> str:
     """
-    Identifica qual gráfico desenhar com base no nome do campo
-    e executa a função correspondente.
+    Recebe os dados brutos e o JSON de decisão da IA, 
+    executando o gráfico adequado automaticamente.
     """
-    configuracao = MAPA_GRAFICOS.get(nome_campo, MAPA_GRAFICOS["default"])
-    funcao_plot, titulo, eixo_x, eixo_y = configuracao
+    tipo = decisao_ia.get("tipo_grafico", "pular").lower()
+    titulo = decisao_ia.get("titulo_sugerido", "Análise de Dados")
+    eixo_x = decisao_ia.get("eixo_x", "")
+    eixo_y = decisao_ia.get("eixo_y", "")
+    
+    # Busca a função certa (ou usa 'pular' se a IA enviar algo muito maluco)
+    funcao_plot = MAPA_FUNCOES_GRAFICOS.get(tipo, pular_grafico)
     
     if funcao_plot == gerar_grafico_pizza:
+        return funcao_plot(dados=dados, titulo=titulo)
+    elif funcao_plot == pular_grafico:
         return funcao_plot(dados=dados, titulo=titulo)
     else:
         return funcao_plot(dados=dados, titulo=titulo, eixo_x=eixo_x, eixo_y=eixo_y)
@@ -161,32 +168,32 @@ def processar_grafico_para_campo(nome_campo: str, dados: dict) -> str:
 # ==========================================
 # CRITÉRIO DE SUCESSO: TESTE LOCAL COM ROTEADOR
 # ==========================================
-if __name__ == "__main__":
-    print("\n--- INICIANDO TESTE DO ROTEADOR DE GRÁFICOS ---")
+# if __name__ == "__main__":
+#     print("\n--- INICIANDO TESTE DO ROTEADOR DE GRÁFICOS ---")
 
-    # Simulando o dicionário de campos ativos que viria do json_parser
-    payload_simulado = {
-        "usuarios_ativos_l6m": {
-            "Jan": 1200, "Fev": 1350, "Mar": 1500, "Abr": 1450, "Mai": 1600, "Jun": 1750
-        },
-        "historico_ltv_mensal": {
-            "Jan": 450, "Fev": 465, "Mar": 480, "Abr": 475, "Mai": 490, "Jun": 510
-        },
-        "volume_por_ativo": {
-            "BTC": 55, "ETH": 25, "SOL": 10, "USDC": 7, "Outros": 3
-        }
-    }
+#     # Simulando o dicionário de campos ativos que viria do json_parser
+#     payload_simulado = {
+#         "usuarios_ativos_l6m": {
+#             "Jan": 1200, "Fev": 1350, "Mar": 1500, "Abr": 1450, "Mai": 1600, "Jun": 1750
+#         },
+#         "historico_ltv_mensal": {
+#             "Jan": 450, "Fev": 465, "Mar": 480, "Abr": 475, "Mai": 490, "Jun": 510
+#         },
+#         "volume_por_ativo": {
+#             "BTC": 55, "ETH": 25, "SOL": 10, "USDC": 7, "Outros": 3
+#         }
+#     }
 
-    # O loop que simula o fluxo do seu orquestrador principal
-    for campo, dados in payload_simulado.items():
-        print(f"\nProcessando requisição para: {campo}")
+#     # O loop que simula o fluxo do seu orquestrador principal
+#     for campo, dados in payload_simulado.items():
+#         print(f"\nProcessando requisição para: {campo}")
         
-        # Chama APENAS o roteador, ele decide o resto
-        caminho_imagem = processar_grafico_para_campo(nome_campo=campo, dados=dados)
+#         # Chama APENAS o roteador, ele decide o resto
+#         caminho_imagem = processar_grafico_para_campo(nome_campo=campo, dados=dados)
         
-        if caminho_imagem:
-            print(f"✅ Sucesso! Gráfico salvo em: {caminho_imagem}")
-        else:
-            print(f"❌ Falha ao gerar o gráfico para {campo}.")
+#         if caminho_imagem:
+#             print(f"✅ Sucesso! Gráfico salvo em: {caminho_imagem}")
+#         else:
+#             print(f"❌ Falha ao gerar o gráfico para {campo}.")
 
-    print("\nTeste concluído! Abra a pasta 'temp_images' para ver os 3 gráficos gerados (Barras, Linha e Donut).")
+#     print("\nTeste concluído! Abra a pasta 'temp_images' para ver os 3 gráficos gerados (Barras, Linha e Donut).")

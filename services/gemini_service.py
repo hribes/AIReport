@@ -1,12 +1,12 @@
 import os
 import json
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.output_parsers import StrOutputParser
+from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
 from langchain_core.prompts import PromptTemplate
 from prompts.templates import MAPA_TEMPLATES
 from utils.logger import configurar_logger
 from config import GOOGLE_API_KEY 
-from prompts.templates import MAPA_TEMPLATES, _contexto_base, TEMPLATE_RESUMO_GERAL
+from prompts.templates import MAPA_TEMPLATES, _contexto_base, TEMPLATE_RESUMO_GERAL, TEMPLATE_CLASSIFICADOR_GRAFICO
 
 
 logger = configurar_logger(__name__)
@@ -67,6 +67,31 @@ def gerar_analise_ia(nome_campo: str, dados_campo: dict) -> str:
         logger.error(f"Erro ao gerar analise para {nome_campo}: {str(e)}")
         return f"**Erro na análise de {nome_campo}:** Não foi possível processar os dados neste momento."
 
+def decidir_tipo_grafico_ia(nome_campo: str, dados: dict) -> dict:
+    """Usa a IA para analisar os dados e decidir dinamicamente o tipo de gráfico e eixos."""
+    logger.info(f"Consultando IA para decidir tipo de grafico para: {nome_campo}")
+    try:
+        llm = ChatGoogleGenerativeAI(
+            model="gemini-2.5-flash", # USE O NOME QUE FUNCIONOU NA SUA CHAVE!
+            temperature=0.0, # Temperatura ZERO para evitar que a IA invente formatos de JSON
+            api_key=GOOGLE_API_KEY
+        )
+        
+        prompt = PromptTemplate(
+            template=TEMPLATE_CLASSIFICADOR_GRAFICO, 
+            input_variables=["nome_campo", "dados"]
+        )
+        
+        # O JsonOutputParser converte o texto da IA direto para um dicionário Python
+        chain = prompt | llm | JsonOutputParser()
+        
+        resposta_json = chain.invoke({"nome_campo": nome_campo, "dados": dados})
+        return resposta_json
+        
+    except Exception as e:
+        logger.error(f"Erro na IA ao classificar grafico para {nome_campo}: {e}")
+        # Fallback de segurança: se a IA falhar, mandamos pular para não quebrar o PDF
+        return {"tipo_grafico": "pular", "titulo_sugerido": "Erro", "eixo_x": "", "eixo_y": ""}
 # ==========================================
 # CRITÉRIO DE SUCESSO: TESTE LOCAL
 # ==========================================

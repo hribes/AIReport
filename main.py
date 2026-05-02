@@ -1,7 +1,7 @@
 import os
 from utils.logger import configurar_logger
-from services.gemini_service import gerar_analise_ia, gerar_resumo_geral
-from services.chart_service import processar_grafico_para_campo
+from services.gemini_service import gerar_analise_ia, gerar_resumo_geral, decidir_tipo_grafico_ia
+from services.chart_service import processar_grafico_dinamico
 from services.pdf_service import gerar_pdf_relatorio
 
 logger = configurar_logger("main")
@@ -36,25 +36,29 @@ def executar_motor_inteligencia():
 
     # 2. Loop Principal (Processando cada indicador)
     for campo, dados in dados_filtrados.items():
-        titulo = titulos_map.get(campo, campo)
-        print(f"\n⚙️ Processando: {titulo}...")
+        print(f"\n⚙️ Processando o campo bruto: {campo}...")
         
-        # A. Pede a análise detalhada para a IA
+        # A. Consulta o Oráculo: Qual gráfico usar? Qual o título?
+        decisao_visual_ia = decidir_tipo_grafico_ia(campo, dados)
+        titulo_inteligente = decisao_visual_ia.get("titulo_sugerido", campo)
+        
+        print(f"   ↳ A IA decidiu: Gráfico de '{decisao_visual_ia.get('tipo_grafico')}' com título '{titulo_inteligente}'")
+
+        # B. Pede a análise detalhada para a IA
         texto_md = gerar_analise_ia(campo, dados)
         
-        # B. Gera o gráfico lindo no Seaborn
-        caminho_img = processar_grafico_para_campo(campo, dados)
+        # C. Gera o gráfico passando a decisão da IA para o roteador dinâmico
+        caminho_img = processar_grafico_dinamico(dados, decisao_visual_ia)
         
-        # C. Guarda na lista do PDF e no blocão de texto para o resumo
+        # D. Guarda na lista do PDF e no blocão de texto para o resumo
         conteudo_secoes.append({
-            "titulo": titulo,
+            "titulo": titulo_inteligente,
             "texto_md": texto_md,
             "imagem": caminho_img
         })
         
-        # Acumula o texto para o resumo final (ignorando erros de sistema)
         if not texto_md.startswith("**Erro"):
-            textos_para_resumo += f"\n\n--- Seção: {titulo} ---\n{texto_md}"
+            textos_para_resumo += f"\n\n--- Seção: {titulo_inteligente} ---\n{texto_md}"
 
     # 3. Geração do Resumo Executivo (A Síntese Transversal)
     print("\n🧠 Analisando todos os textos para criar o Sumário Executivo...")

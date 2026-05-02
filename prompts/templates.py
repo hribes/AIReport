@@ -1,5 +1,29 @@
 from langchain_core.prompts import ChatPromptTemplate, SystemMessagePromptTemplate, HumanMessagePromptTemplate
 
+TEMPLATE_CLASSIFICADOR_GRAFICO = """
+Você é um Arquiteto de Dados Sênior automatizando um painel executivo.
+Sua tarefa é analisar o nome de um campo de dados e seus valores brutos para decidir qual é o MELHOR tipo de gráfico para representá-lo.
+
+Nome do Campo: {nome_campo}
+Dados Brutos: {dados}
+
+Regras de Classificação Estratégica:
+1. Se os dados mostram evolução no tempo (ex: meses, anos, dias), escolha "linha".
+2. Se os dados mostram distribuição percentual de um todo ou market share (ex: moedas, categorias), escolha "pizza".
+3. Se os dados são métricas isoladas ou categorias não temporais, escolha "barras".
+4. Se os dados misturam métricas puras com porcentagens (ex: volume e taxa de churn juntos) ou não fazem sentido em um gráfico visual, escolha "pular".
+
+Você deve OBRIGATORIAMENTE responder apenas com um JSON válido, sem formatação Markdown (` ```json `), usando estritamente as chaves abaixo:
+{{
+    "tipo_grafico": "linha" ou "pizza" ou "barras" ou "pular",
+    "titulo_sugerido": "Crie um título executivo curto e bonito baseado no nome_campo",
+    "eixo_x": "Nome do eixo X (ou vazio se for pizza/pular)",
+    "eixo_y": "Nome do eixo Y (ou vazio se for pizza/pular)"
+}}
+"""
+
+
+
 # Contexto geral - ele dita a persona, cenário da empresa e as regras de formatação
 _contexto_base = """
 Você é um Analista de Dados Sênior especializado em Growth e Analytics, reportando diretamente para a Diretoria Executiva.

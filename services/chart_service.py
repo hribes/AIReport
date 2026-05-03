@@ -145,22 +145,30 @@ MAPA_FUNCOES_GRAFICOS = {
     "pular": pular_grafico
 }
 
-def processar_grafico_dinamico(dados: dict, decisao_ia: dict) -> str:
+def processar_grafico_dinamico(dados_brutos: dict, decisao_ia: dict) -> str:
     """
-    Recebe os dados brutos e o JSON de decisão da IA, 
-    executando o gráfico adequado automaticamente.
+    Recebe os dados brutos e a decisão da IA, extraindo a matriz processada 
+    para não quebrar as bibliotecas de plotagem com JSONs aninhados.
     """
     tipo = decisao_ia.get("tipo_grafico", "pular").lower()
     titulo = decisao_ia.get("titulo_sugerido", "Análise de Dados")
     eixo_x = decisao_ia.get("eixo_x", "")
     eixo_y = decisao_ia.get("eixo_y", "")
     
-    # Busca a função certa (ou usa 'pular' se a IA enviar algo muito maluco)
+    # AQUI ESTÁ A MÁGICA: Pegamos os dados planos que a IA extraiu!
+    # Se a IA não extraiu, cai nos dados brutos (que o 'pular' vai apenas ignorar)
+    dados_limpos_para_plot = decisao_ia.get("dados_processados", dados_brutos)
+    
+    # Trava de segurança: Se a IA escolheu gráfico mas não mandou os dados achatados, nós pulamos.
+    if tipo != "pular" and not isinstance(dados_limpos_para_plot, dict):
+        logger.warning(f"IA escolheu '{tipo}' mas falhou em achatar os dados. Forçando 'pular'.")
+        tipo = "pular"
+    
     funcao_plot = MAPA_FUNCOES_GRAFICOS.get(tipo, pular_grafico)
     
-    if funcao_plot == gerar_grafico_pizza:
-        return funcao_plot(dados=dados, titulo=titulo)
-    elif funcao_plot == pular_grafico:
-        return funcao_plot(dados=dados, titulo=titulo)
+    if funcao_plot == pular_grafico:
+        return funcao_plot(dados=dados_limpos_para_plot, titulo=titulo)
+    elif funcao_plot == gerar_grafico_pizza:
+        return funcao_plot(dados=dados_limpos_para_plot, titulo=titulo)
     else:
-        return funcao_plot(dados=dados, titulo=titulo, eixo_x=eixo_x, eixo_y=eixo_y)
+        return funcao_plot(dados=dados_limpos_para_plot, titulo=titulo, eixo_x=eixo_x, eixo_y=eixo_y)

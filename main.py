@@ -2,12 +2,15 @@ import os
 import time
 import json
 import shutil
+from typing import List, Dict, Any
+from concurrent.futures import ThreadPoolExecutor
+
 from utils.logger import configurar_logger
 from services.gemini_service import gerar_analise_ia, gerar_resumo_geral, decidir_tipo_grafico_ia
 from services.chart_service import processar_grafico_dinamico
 from services.pdf_service import gerar_pdf_relatorio
 from utils.base64_encoder import codificar_pdf_para_base64
-from typing import List, Dict, Any
+
 
 logger = configurar_logger("main")
 
@@ -23,34 +26,52 @@ def limpar_arquivos_temporarios():
             except Exception as e:
                 logger.warning(f"Não foi possível limpar a pasta '{pasta}': {e}")
 
+def limpar_caracteres_unicode(texto: str) -> str:
+    """Higieniza o texto da IA para não quebrar a fonte Helvetica do PDF.""" #Estava com erro por causa de travessão
+    return (texto
+            .replace("–", "-")   # Travessão (en-dash) para hífen
+            .replace("—", "-")   # Travessão longo (em-dash) para hífen
+            .replace("“", '"')   # Aspas inteligentes para aspas normais
+            .replace("”", '"')
+            .replace("‘", "'")
+            .replace("’", "'")
+            .replace("•", "*")   # Bullet point para asterisco
+            )
+
 def adaptar_payload_micro_macro(payload_lista: List[dict]) -> Dict[str, dict]:
-    """
-    Filtra apenas as seções selecionadas (selected=1) e reestrutura o JSON.
-    Transforma a lista complexa em um dicionário focado para a IA.
-    """
     dados_estruturados = {}
-    
     for sessao in payload_lista:
         if sessao.get("selected") == 1:
             titulo_sessao = sessao.get("selected_field", "Sessão Sem Nome")
-            
-            # Busca 'data', mas se não achar, busca 'filter' (compatibilidade total)
             visao = sessao.get("data", sessao.get("filter", []))
-            
             dados_estruturados[titulo_sessao] = {
                 "visao_macro": visao,
                 "evidencias_micro_db": sessao.get("dados_banco", {})
             }
-            
     return dados_estruturados
 
+def processar_secao_isolada(campo: str, dados: dict) -> dict:
+    """Executa a IA e a criação de gráficos de forma independente."""
+    logger.info(f"[THREAD START] Processando seção: {campo}")
+    
+    decisao_visual_ia = decidir_tipo_grafico_ia(campo, dados)
+    titulo_inteligente = decisao_visual_ia.get("titulo_sugerido", campo)
+    
+    texto_md = limpar_caracteres_unicode(gerar_analise_ia(campo, dados))
+    
+    caminho_img = processar_grafico_dinamico(dados, decisao_visual_ia)
+    
+    logger.info(f"[THREAD DONE] Seção finalizada: {titulo_inteligente}")
+    
+    return {
+        "titulo": titulo_inteligente,
+        "texto_md": texto_md,
+        "imagem": caminho_img
+    }
+
 def executar_motor_inteligencia(payload_entrada: List[dict]) -> str:
-    """
-    Recebe os dados brutos, orquestra a IA, gera o PDF, converte para Base64 
-    e retorna um JSON de resposta estrito para o sistema chamador.
-    """
     tempo_inicio = time.time()
-    logger.info("Iniciando Motor de Inteligência Executiva...")
+    logger.info("Iniciando Motor de Inteligência Executiva (Modo Paralelo)...")
 
     resposta_final = {
         "status": "erro",
@@ -65,27 +86,27 @@ def executar_motor_inteligencia(payload_entrada: List[dict]) -> str:
 
         dados_filtrados = adaptar_payload_micro_macro(payload_entrada)
 
-        for campo, dados in dados_filtrados.items():
-            logger.info(f"Processando campo bruto: {campo}...")
+        # Usamos o ThreadPool para criar um 'Pool' de trabalhadores
+        # len(dados_filtrados) faz com que ele crie exatamente o número de threads que se tem de seções
+        logger.info(f"Disparando {len(dados_filtrados)} requisições simultâneas para o Google...")
+        
+        with ThreadPoolExecutor(max_workers=len(dados_filtrados) or 1) as executor:
             
-            decisao_visual_ia = decidir_tipo_grafico_ia(campo, dados)
-            titulo_inteligente = decisao_visual_ia.get("titulo_sugerido", campo)
-            logger.info(f"A IA decidiu: Gráfico de '{decisao_visual_ia.get('tipo_grafico')}' com título '{titulo_inteligente}'")
-
-            texto_md = gerar_analise_ia(campo, dados)
-            caminho_img = processar_grafico_dinamico(dados, decisao_visual_ia)
+            # O List Comprehension guarda na mesma ordem original do JSON
+            futures = [
+                executor.submit(processar_secao_isolada, campo, dados)
+                for campo, dados in dados_filtrados.items()
+            ]
             
-            conteudo_secoes.append({
-                "titulo": titulo_inteligente,
-                "texto_md": texto_md,
-                "imagem": caminho_img
-            })
-            
-            if not texto_md.startswith("**Erro"):
-                textos_para_resumo += f"\n\n--- Seção: {titulo_inteligente} ---\n{texto_md}"
-
-            logger.info("Aguardando 10 segundos de segurança para a API...") #Como a API é gratuita tem uma quantidade limite de requisições por minuto
-            time.sleep(10)
+            for future in futures:
+                resultado = future.result() # Isso trava até que a thread específica termine
+                
+                conteudo_secoes.append(resultado)
+                
+                texto = resultado["texto_md"]
+                titulo = resultado["titulo"]
+                if not texto.startswith("**Erro"):
+                    textos_para_resumo += f"\n\n--- Seção: {titulo} ---\n{texto}"
 
         logger.info("Analisando textos para criar o Sumário Executivo...")
         resumo_geral_md = gerar_resumo_geral(textos_para_resumo)
@@ -116,12 +137,13 @@ def executar_motor_inteligencia(payload_entrada: List[dict]) -> str:
         
         duracao_total = time.time() - tempo_inicio
         resposta_final["tempo_execucao_segundos"] = round(duracao_total, 2)
-        logger.info(f"Processo finalizado em {resposta_final['tempo_execucao_segundos']}s")
+        
+        logger.info(f"Processo finalizado em  {resposta_final['tempo_execucao_segundos']}s")
 
         return json.dumps(resposta_final, ensure_ascii=False, indent=2)
 
 # ==========================================
-# ÁREA DE TESTE DO MICROSERVIÇO
+# ÁREA DE TESTE 
 # ==========================================
 if __name__ == "__main__":
     # O JSON inicial (Payload) que viria do seu banco ou webhook

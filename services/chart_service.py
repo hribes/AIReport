@@ -1,5 +1,7 @@
 import os
 import uuid
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import seaborn as sns
 from utils.logger import configurar_logger
@@ -10,7 +12,6 @@ sns.set_theme(style="whitegrid")
 COR_PRIMARIA = "#0047AB" 
 
 
-#MELHORAR O VISUAL DOS GRÁFICOS
 def _garantir_pasta_temp():
     """Cria a pasta temporária para armazenar os gráficos, se não existir."""
     pasta = "temp_images"
@@ -34,13 +35,13 @@ def gerar_grafico_barras(dados: dict, titulo: str, eixo_x: str, eixo_y: str) -> 
         
         plt.figure(figsize=(8, 5))
         
-        ax = sns.barplot(x=categorias, y=valores, color=COR_PRIMARIA)
+        ax = sns.barplot(x=valores, y=categorias, color=COR_PRIMARIA)
         
         plt.title(titulo, fontsize=14, pad=15, fontweight='bold')
-        plt.xlabel(eixo_x, fontsize=11)
-        plt.ylabel(eixo_y, fontsize=11)
+        plt.xlabel(eixo_y, fontsize=11) # Esta trocado pq é a IA quem envia, pensando que é barras verticais, mas como quero horizontais eu precisei trocar os eixos
+        plt.ylabel(eixo_x, fontsize=11)
         
-        ax.bar_label(ax.containers[0], padding=3)
+        ax.bar_label(ax.containers[0], padding=4, fmt='%.1f')
         
         sns.despine()
         
@@ -155,11 +156,11 @@ def processar_grafico_dinamico(dados_brutos: dict, decisao_ia: dict) -> str:
     eixo_x = decisao_ia.get("eixo_x", "")
     eixo_y = decisao_ia.get("eixo_y", "")
     
-    # AQUI ESTÁ A MÁGICA: Pegamos os dados planos que a IA extraiu!
-    # Se a IA não extraiu, cai nos dados brutos (que o 'pular' vai apenas ignorar)
+    # Pega os dados planos que a IA extraiu
+    # Se a IA não extraiu, cai nos dados brutos
     dados_limpos_para_plot = decisao_ia.get("dados_processados", dados_brutos)
     
-    # Trava de segurança: Se a IA escolheu gráfico mas não mandou os dados achatados, nós pulamos.
+    # Trava de segurança Se a IA escolheu gráfico mas não mandou os dados achatados, pulamos
     if tipo != "pular" and not isinstance(dados_limpos_para_plot, dict):
         logger.warning(f"IA escolheu '{tipo}' mas falhou em achatar os dados. Forçando 'pular'.")
         tipo = "pular"

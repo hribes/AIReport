@@ -1,9 +1,13 @@
 import os
 import time
-import json
 import shutil
 from typing import List, Dict, Any
 from concurrent.futures import ThreadPoolExecutor
+
+# Importações do FastAPI
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+import uvicorn
 
 from utils.logger import configurar_logger
 from services.gemini_service import gerar_analise_ia, gerar_resumo_geral, decidir_tipo_grafico_ia
@@ -11,13 +15,27 @@ from services.chart_service import processar_grafico_dinamico
 from services.pdf_service import gerar_pdf_relatorio
 from utils.base64_encoder import codificar_pdf_para_base64
 
-
 logger = configurar_logger("main")
 
+# API
+app = FastAPI(
+    title="Motor de Inteligência Executiva API",
+    description="API para geração de relatórios PDF guiados por IA com base em dados do Jira/OKRs.",
+    version="1.0.0"
+)
+
+# Configuração de CORS (Essencial para o front-end conseguir acessar a API sem bloqueios)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], # Em produção, substitua pelo domínio do seu front
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+#funções internas
 def limpar_arquivos_temporarios():
-    """Deleta as pastas temporárias onde imagens e PDFs foram salvos."""
-    pastas_para_limpar = ["temp_images"] #por enquanto irei manter a pasta temporária do relatorio
-    
+    pastas_para_limpar = ["temp_images"]
     for pasta in pastas_para_limpar:
         if os.path.exists(pasta):
             try:
@@ -27,15 +45,14 @@ def limpar_arquivos_temporarios():
                 logger.warning(f"Não foi possível limpar a pasta '{pasta}': {e}")
 
 def limpar_caracteres_unicode(texto: str) -> str:
-    """Higieniza o texto da IA para não quebrar a fonte Helvetica do PDF.""" #Estava com erro por causa de travessão
     return (texto
-            .replace("–", "-")   # Travessão (en-dash) para hífen
-            .replace("—", "-")   # Travessão longo (em-dash) para hífen
-            .replace("“", '"')   # Aspas inteligentes para aspas normais
+            .replace("–", "-")
+            .replace("—", "-")
+            .replace("“", '"')
             .replace("”", '"')
             .replace("‘", "'")
             .replace("’", "'")
-            .replace("•", "*")   # Bullet point para asterisco
+            .replace("•", "*")
             )
 
 def adaptar_payload_micro_macro(payload_lista: List[dict]) -> Dict[str, dict]:
@@ -51,14 +68,11 @@ def adaptar_payload_micro_macro(payload_lista: List[dict]) -> Dict[str, dict]:
     return dados_estruturados
 
 def processar_secao_isolada(campo: str, dados: dict) -> dict:
-    """Executa a IA e a criação de gráficos de forma independente."""
     logger.info(f"[THREAD START] Processando seção: {campo}")
     
     decisao_visual_ia = decidir_tipo_grafico_ia(campo, dados)
     titulo_inteligente = decisao_visual_ia.get("titulo_sugerido", campo)
-    
     texto_md = limpar_caracteres_unicode(gerar_analise_ia(campo, dados))
-    
     caminho_img = processar_grafico_dinamico(dados, decisao_visual_ia)
     
     logger.info(f"[THREAD DONE] Seção finalizada: {titulo_inteligente}")
@@ -69,9 +83,10 @@ def processar_secao_isolada(campo: str, dados: dict) -> dict:
         "imagem": caminho_img
     }
 
-def executar_motor_inteligencia(payload_entrada: List[dict]) -> str:
+def executar_motor_inteligencia(payload_entrada: List[dict]) -> dict:
+    # Retornamos um DICT direto. O FastAPI cuida do JSON.
     tempo_inicio = time.time()
-    logger.info("Iniciando Motor de Inteligência Executiva (Modo Paralelo)...")
+    logger.info("Iniciando Motor de Inteligência Executiva (Modo Paralelo API)...")
 
     resposta_final = {
         "status": "erro",
@@ -86,23 +101,17 @@ def executar_motor_inteligencia(payload_entrada: List[dict]) -> str:
 
         dados_filtrados = adaptar_payload_micro_macro(payload_entrada)
 
-        # Usamos o ThreadPool para criar um 'Pool' de trabalhadores
-        # len(dados_filtrados) faz com que ele crie exatamente o número de threads que se tem de seções
         logger.info(f"Disparando {len(dados_filtrados)} requisições simultâneas para o Google...")
         
         with ThreadPoolExecutor(max_workers=len(dados_filtrados) or 1) as executor:
-            
-            # O List Comprehension guarda na mesma ordem original do JSON
             futures = [
                 executor.submit(processar_secao_isolada, campo, dados)
                 for campo, dados in dados_filtrados.items()
             ]
             
             for future in futures:
-                resultado = future.result() # Isso trava até que a thread específica termine
-                
+                resultado = future.result()
                 conteudo_secoes.append(resultado)
-                
                 texto = resultado["texto_md"]
                 titulo = resultado["titulo"]
                 if not texto.startswith("**Erro"):
@@ -134,144 +143,173 @@ def executar_motor_inteligencia(payload_entrada: List[dict]) -> str:
     finally:
         logger.info("Limpando arquivos temporários do disco...")
         limpar_arquivos_temporarios()
-        
         duracao_total = time.time() - tempo_inicio
         resposta_final["tempo_execucao_segundos"] = round(duracao_total, 2)
-        
         logger.info(f"Processo finalizado em  {resposta_final['tempo_execucao_segundos']}s")
 
-        return json.dumps(resposta_final, ensure_ascii=False, indent=2)
+        return resposta_final
+
+# =================================================================
+# ROTAS DA API
+# =================================================================
+@app.get("/health", tags=["Monitoramento"])
+def health_check():
+    """Rota simples para verificar se a API está online."""
+    return {"status": "online", "mensagem": "Motor de Inteligência operando normalmente."}
+
+@app.post("/api/v1/gerar-relatorio", tags=["Relatórios"])
+def endpoint_gerar_relatorio(payload: List[dict]):
+    """
+    Recebe o JSON do Front-end, processa em paralelo com o Gemini 
+    e devolve o PDF em Base64.
+    """
+    logger.info("Nova requisição HTTP recebida no endpoint /gerar-relatorio")
+    
+    resultado = executar_motor_inteligencia(payload)
+    
+    # Se o motor capturou um erro, devolvemos um erro HTTP 500 elegante
+    if resultado["status"] == "erro":
+        raise HTTPException(status_code=500, detail=resultado["mensagem"])
+        
+    return resultado
+
+# =================================================================
+# INICIALIZADOR DO SERVIDOR
+# =================================================================
+if __name__ == "__main__":
+    logger.info("Subindo servidor FastAPI...")
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
 
 # ==========================================
 # ÁREA DE TESTE 
 # ==========================================
-if __name__ == "__main__":
-    # O JSON inicial (Payload) que viria do seu banco ou webhook
-    json_inicial_simulado = [
-  {
-    "selected_field": "Equipes",
-    "selected": 1,
-    "filter": [],
-    "dados_banco": {
-      "Users": [
-        { "id": 1, "name": "Paola", "email": "paola@empresa.com", "role": "Lead Developer", "squad_name": "Gerar Relatorio Inteligente", "is_manager": True, "manager_id": None, "created_at": "2025-01-15T08:30:00Z" },
-        { "id": 2, "name": "Clara Almeida", "email": "clara@empresa.com", "role": "Designer", "squad_name": "Gerar Relatorio Inteligente", "is_manager": False, "manager_id": 1, "created_at": "2025-02-20T09:00:00Z" },
-        { "id": 3, "name": "Maria Lopes", "email": "maria@empresa.com", "role": "Back-end", "squad_name": "Gerar Relatorio Inteligente", "is_manager": False, "manager_id": 1, "created_at": "2025-03-10T10:00:00Z" },
-        { "id": 4, "name": "Marcos Souza", "email": "marcos@empresa.com", "role": "Back-end", "squad_name": "Gerar Relatorio Inteligente", "is_manager": False, "manager_id": 1, "created_at": "2025-03-15T14:00:00Z" }
-      ]
-    }
-  },
-  {
-    "selected_field": "Visão geral das OKR",
-    "selected": 1,
-    "filter": [
-      {
-        "id": "OKR_0001"
-      }
-    ],
-    "dados_banco": {
-      "OKRs": [
-        { "id": "OKR_0001", "cycle_id": 10, "title": "Atingir R$ 500 mil em Novos Negócios", "description": "Foco em expansão B2B no trimestre", "manager_id": 5, "goal_progression": 86.0, "period": "simulado", "created_at": "2026-01-05T10:00:00Z" }
-      ],
-      "Cycles": [
-        { "id": 10, "name": "Ciclo Q1-2026", "quarter_name": "Q1", "is_current_quarter": False, "year": 2026 }
-      ]
-    }
-  },
-  {
-    "selected_field": "Progresso do projeto",
-    "selected": 1,
-    "filter": [{
-        "id": "10001",
-        "key": "Projeto A"
-    }],
-    "dados_banco": {
-      "Jira_Projects": [
-        { "id": 50, "external_id": "10001", "project_key": "PROJA", "name": "Gerar Relatorio Inteligente", "last_sync": "2026-05-02T18:00:00Z" }
-      ],
-      "Jira_Tasks": [
-        { "id": 5001, "external_key": "PROJA-01", "summary": "Refatorar componente de filtro", "project_id": 50, "user_id": 1, "kr_id": 205, "issue_type": "Task", "status_name": "To Do", "priority_name": "High", "story_points": 5, "assignee_account_id": "u101", "created_at": "2026-04-10T14:00:00Z", "resolved_at": None, "updated_at": "2026-04-15T09:30:00Z" },
-        { "id": 5002, "external_key": "PROJA-02", "summary": "Ajustar alinhamento do eixo Y no CSS", "project_id": 50, "user_id": 2, "kr_id": 204, "issue_type": "Sub-task", "status_name": "In Progress", "priority_name": "Medium", "story_points": 3, "assignee_account_id": "u102", "created_at": "2026-04-12T10:00:00Z", "resolved_at": None, "updated_at": "2026-04-20T11:00:00Z" },
-        { "id": 5003, "external_key": "PROJA-03", "summary": "Integrar mock de OKRs", "project_id": 50, "user_id": 3, "kr_id": 203, "issue_type": "Task", "status_name": "To Do", "priority_name": "Medium", "story_points": 5, "assignee_account_id": "u102", "created_at": "2026-04-25T09:00:00Z", "resolved_at": None, "updated_at": "2026-04-28T16:00:00Z" }
-      ]
-    }
-  },
-  {
-    "selected_field": "Todos os projetos",
-    "selected": 1,
-    "filter": [],
-    "dados_banco": {
-      "Jira_Projects": [
-        { "id": 50, "external_id": "10001", "project_key": "PROJA", "name": "Gerar Relatorio Inteligente", "last_sync": "2026-05-02T18:00:00Z" },
-        { "id": 51, "external_id": "10002", "project_key": "PROJB", "name": "Monitoramento de KR", "last_sync": "2026-05-02T18:05:00Z" },
-        { "id": 52, "external_id": "10003", "project_key": "PROJC", "name": "ChatBot de Atendimento", "last_sync": "2026-05-02T18:10:00Z" }
-      ],
-      "Jira_Sync_Config": [
-        { "id": 5, "user_id": 1, "project_key": "PROJA", "jql_url": "project = PROJA AND status != Closed", "last_sync": "2026-05-02T18:00:00Z" },
-        { "id": 6, "user_id": 3, "project_key": "PROJB", "jql_url": "project = PROJB AND status != Closed", "last_sync": "2026-05-02T18:05:00Z" },
-        { "id": 7, "user_id": 4, "project_key": "PROJC", "jql_url": "project = PROJC AND status != Closed", "last_sync": "2026-05-02T18:10:00Z" }
-      ]
-    }
-  },
-  {
-    "selected_field": "Histórico de OKR",
-    "selected": 1,
-    "filter": [],
-    "dados_banco": {
-      "Metrics_History": [
-        { "id": 9001, "target_id": 101, "type": "OKR", "captured_value": 40.0, "recorded_at": "2026-02-01T10:00:00Z" },
-        { "id": 9002, "target_id": 101, "type": "OKR", "captured_value": 75.0, "recorded_at": "2026-03-01T10:00:00Z" },
-        { "id": 9003, "target_id": 101, "type": "OKR", "captured_value": 86.0, "recorded_at": "2026-04-01T10:00:00Z" },
-        { "id": 9004, "target_id": 102, "type": "OKR", "captured_value": 10.0, "recorded_at": "2026-04-15T10:00:00Z" },
-        { "id": 9005, "target_id": 102, "type": "OKR", "captured_value": 20.0, "recorded_at": "2026-05-01T10:00:00Z" },
-        { "id": 9006, "target_id": 103, "type": "OKR", "captured_value": 50.0, "recorded_at": "2026-04-01T10:00:00Z" },
-        { "id": 9007, "target_id": 103, "type": "OKR", "captured_value": 100.0, "recorded_at": "2026-05-01T10:00:00Z" },
-        { "id": 9008, "target_id": 104, "type": "OKR", "captured_value": 0.0, "recorded_at": "2026-05-01T10:00:00Z" },
-        { "id": 9009, "target_id": 105, "type": "OKR", "captured_value": 0.0, "recorded_at": "2026-05-01T10:00:00Z" }
-      ]
-    }
-  },
-  {
-    "selected_field": "Key Results",
-    "selected": 1,
-    "filter": [],
-    "dados_banco": {
-      "Key_Results": [
-        { "id": 201, "okr_id": 105, "title": "Reduzir a taxa de erros e correções em 50%", "description": "A taxa atualmente se encontra em 1 erro a cada 10 homologações; a meta é chegarmos a 1 erro a cada 20 homologações.", "initial_value": 10.0, "goal_value": 20.0, "current_value": 14.0, "unit": "erros/homologações", "limit_date": "2026-12-31T23:59:59Z", "last_updated": "2026-05-01T15:20:00Z" },
-        { "id": 202, "okr_id": 105, "title": "Reduzir o Lead Time de novas funcionalidades em 15%", "description": "O tempo entre a definição do requisito e o deploy em produção é de 20 dias; a meta é otimizar o fluxo para 17 dias.", "initial_value": 20.0, "goal_value": 17.0, "current_value": 19.0, "unit": "dias", "limit_date": "2026-12-31T23:59:59Z", "last_updated": "2026-05-01T15:20:00Z" },
-        { "id": 203, "okr_id": 103, "title": "Melhorar a performance de carregamento do dashboard em 30%", "description": "O tempo médio atual de carregamento (LCP) é de 3,5 segundos; a meta é atingir 2,45 segundos para otimizar a experiência do usuário final.", "initial_value": 3.5, "goal_value": 2.45, "current_value": 2.45, "unit": "segundos", "limit_date": "2026-06-30T23:59:59Z", "last_updated": "2026-05-01T15:20:00Z" },
-        { "id": 204, "okr_id": 102, "title": "Reduzir o tempo médio de primeira resposta (FRT) em 20%", "description": "Atualmente, o suporte leva em média 5 horas para o primeiro contato; a meta é reduzir para 4 horas através da automação de triagem.", "initial_value": 5.0, "goal_value": 4.0, "current_value": 4.8, "unit": "horas", "limit_date": "2026-06-30T23:59:59Z", "last_updated": "2026-05-01T15:20:00Z" }
-      ],
-      "Metrics_History": [
-        { "id": 9010, "target_id": 201, "type": "KR", "captured_value": 10.0, "recorded_at": "2026-01-10T09:00:00Z" },
-        { "id": 9011, "target_id": 201, "type": "KR", "captured_value": 12.0, "recorded_at": "2026-03-15T14:00:00Z" },
-        { "id": 9012, "target_id": 201, "type": "KR", "captured_value": 14.0, "recorded_at": "2026-05-01T15:20:00Z" },
-        { "id": 9013, "target_id": 202, "type": "KR", "captured_value": 20.0, "recorded_at": "2026-01-10T09:00:00Z" },
-        { "id": 9014, "target_id": 202, "type": "KR", "captured_value": 19.0, "recorded_at": "2026-05-01T15:20:00Z" },
-        { "id": 9015, "target_id": 203, "type": "KR", "captured_value": 3.5, "recorded_at": "2026-01-10T09:00:00Z" },
-        { "id": 9016, "target_id": 203, "type": "KR", "captured_value": 2.45, "recorded_at": "2026-05-01T15:20:00Z" },
-        { "id": 9017, "target_id": 204, "type": "KR", "captured_value": 5.0, "recorded_at": "2026-01-10T09:00:00Z" },
-        { "id": 9018, "target_id": 204, "type": "KR", "captured_value": 4.8, "recorded_at": "2026-05-01T15:20:00Z" }
-      ]
-    }
-  }
-]
+# if __name__ == "__main__":
+#     # O JSON inicial (Payload) que viria do seu banco ou webhook
+    # json_inicial_simulado = [
+#   {
+#     "selected_field": "Equipes",
+#     "selected": 1,
+#     "filter": [],
+#     "dados_banco": {
+#       "Users": [
+#         { "id": 1, "name": "Paola", "email": "paola@empresa.com", "role": "Lead Developer", "squad_name": "Gerar Relatorio Inteligente", "is_manager": True, "manager_id": None, "created_at": "2025-01-15T08:30:00Z" },
+#         { "id": 2, "name": "Clara Almeida", "email": "clara@empresa.com", "role": "Designer", "squad_name": "Gerar Relatorio Inteligente", "is_manager": False, "manager_id": 1, "created_at": "2025-02-20T09:00:00Z" },
+#         { "id": 3, "name": "Maria Lopes", "email": "maria@empresa.com", "role": "Back-end", "squad_name": "Gerar Relatorio Inteligente", "is_manager": False, "manager_id": 1, "created_at": "2025-03-10T10:00:00Z" },
+#         { "id": 4, "name": "Marcos Souza", "email": "marcos@empresa.com", "role": "Back-end", "squad_name": "Gerar Relatorio Inteligente", "is_manager": False, "manager_id": 1, "created_at": "2025-03-15T14:00:00Z" }
+#       ]
+#     }
+#   },
+#   {
+#     "selected_field": "Visão geral das OKR",
+#     "selected": 1,
+#     "filter": [
+#       {
+#         "id": "OKR_0001"
+#       }
+#     ],
+#     "dados_banco": {
+#       "OKRs": [
+#         { "id": "OKR_0001", "cycle_id": 10, "title": "Atingir R$ 500 mil em Novos Negócios", "description": "Foco em expansão B2B no trimestre", "manager_id": 5, "goal_progression": 86.0, "period": "simulado", "created_at": "2026-01-05T10:00:00Z" }
+#       ],
+#       "Cycles": [
+#         { "id": 10, "name": "Ciclo Q1-2026", "quarter_name": "Q1", "is_current_quarter": False, "year": 2026 }
+#       ]
+#     }
+#   },
+#   {
+#     "selected_field": "Progresso do projeto",
+#     "selected": 1,
+#     "filter": [{
+#         "id": "10001",
+#         "key": "Projeto A"
+#     }],
+#     "dados_banco": {
+#       "Jira_Projects": [
+#         { "id": 50, "external_id": "10001", "project_key": "PROJA", "name": "Gerar Relatorio Inteligente", "last_sync": "2026-05-02T18:00:00Z" }
+#       ],
+#       "Jira_Tasks": [
+#         { "id": 5001, "external_key": "PROJA-01", "summary": "Refatorar componente de filtro", "project_id": 50, "user_id": 1, "kr_id": 205, "issue_type": "Task", "status_name": "To Do", "priority_name": "High", "story_points": 5, "assignee_account_id": "u101", "created_at": "2026-04-10T14:00:00Z", "resolved_at": None, "updated_at": "2026-04-15T09:30:00Z" },
+#         { "id": 5002, "external_key": "PROJA-02", "summary": "Ajustar alinhamento do eixo Y no CSS", "project_id": 50, "user_id": 2, "kr_id": 204, "issue_type": "Sub-task", "status_name": "In Progress", "priority_name": "Medium", "story_points": 3, "assignee_account_id": "u102", "created_at": "2026-04-12T10:00:00Z", "resolved_at": None, "updated_at": "2026-04-20T11:00:00Z" },
+#         { "id": 5003, "external_key": "PROJA-03", "summary": "Integrar mock de OKRs", "project_id": 50, "user_id": 3, "kr_id": 203, "issue_type": "Task", "status_name": "To Do", "priority_name": "Medium", "story_points": 5, "assignee_account_id": "u102", "created_at": "2026-04-25T09:00:00Z", "resolved_at": None, "updated_at": "2026-04-28T16:00:00Z" }
+#       ]
+#     }
+#   },
+#   {
+#     "selected_field": "Todos os projetos",
+#     "selected": 1,
+#     "filter": [],
+#     "dados_banco": {
+#       "Jira_Projects": [
+#         { "id": 50, "external_id": "10001", "project_key": "PROJA", "name": "Gerar Relatorio Inteligente", "last_sync": "2026-05-02T18:00:00Z" },
+#         { "id": 51, "external_id": "10002", "project_key": "PROJB", "name": "Monitoramento de KR", "last_sync": "2026-05-02T18:05:00Z" },
+#         { "id": 52, "external_id": "10003", "project_key": "PROJC", "name": "ChatBot de Atendimento", "last_sync": "2026-05-02T18:10:00Z" }
+#       ],
+#       "Jira_Sync_Config": [
+#         { "id": 5, "user_id": 1, "project_key": "PROJA", "jql_url": "project = PROJA AND status != Closed", "last_sync": "2026-05-02T18:00:00Z" },
+#         { "id": 6, "user_id": 3, "project_key": "PROJB", "jql_url": "project = PROJB AND status != Closed", "last_sync": "2026-05-02T18:05:00Z" },
+#         { "id": 7, "user_id": 4, "project_key": "PROJC", "jql_url": "project = PROJC AND status != Closed", "last_sync": "2026-05-02T18:10:00Z" }
+#       ]
+#     }
+#   },
+#   {
+#     "selected_field": "Histórico de OKR",
+#     "selected": 1,
+#     "filter": [],
+#     "dados_banco": {
+#       "Metrics_History": [
+#         { "id": 9001, "target_id": 101, "type": "OKR", "captured_value": 40.0, "recorded_at": "2026-02-01T10:00:00Z" },
+#         { "id": 9002, "target_id": 101, "type": "OKR", "captured_value": 75.0, "recorded_at": "2026-03-01T10:00:00Z" },
+#         { "id": 9003, "target_id": 101, "type": "OKR", "captured_value": 86.0, "recorded_at": "2026-04-01T10:00:00Z" },
+#         { "id": 9004, "target_id": 102, "type": "OKR", "captured_value": 10.0, "recorded_at": "2026-04-15T10:00:00Z" },
+#         { "id": 9005, "target_id": 102, "type": "OKR", "captured_value": 20.0, "recorded_at": "2026-05-01T10:00:00Z" },
+#         { "id": 9006, "target_id": 103, "type": "OKR", "captured_value": 50.0, "recorded_at": "2026-04-01T10:00:00Z" },
+#         { "id": 9007, "target_id": 103, "type": "OKR", "captured_value": 100.0, "recorded_at": "2026-05-01T10:00:00Z" },
+#         { "id": 9008, "target_id": 104, "type": "OKR", "captured_value": 0.0, "recorded_at": "2026-05-01T10:00:00Z" },
+#         { "id": 9009, "target_id": 105, "type": "OKR", "captured_value": 0.0, "recorded_at": "2026-05-01T10:00:00Z" }
+#       ]
+#     }
+#   },
+#   {
+#     "selected_field": "Key Results",
+#     "selected": 1,
+#     "filter": [],
+#     "dados_banco": {
+#       "Key_Results": [
+#         { "id": 201, "okr_id": 105, "title": "Reduzir a taxa de erros e correções em 50%", "description": "A taxa atualmente se encontra em 1 erro a cada 10 homologações; a meta é chegarmos a 1 erro a cada 20 homologações.", "initial_value": 10.0, "goal_value": 20.0, "current_value": 14.0, "unit": "erros/homologações", "limit_date": "2026-12-31T23:59:59Z", "last_updated": "2026-05-01T15:20:00Z" },
+#         { "id": 202, "okr_id": 105, "title": "Reduzir o Lead Time de novas funcionalidades em 15%", "description": "O tempo entre a definição do requisito e o deploy em produção é de 20 dias; a meta é otimizar o fluxo para 17 dias.", "initial_value": 20.0, "goal_value": 17.0, "current_value": 19.0, "unit": "dias", "limit_date": "2026-12-31T23:59:59Z", "last_updated": "2026-05-01T15:20:00Z" },
+#         { "id": 203, "okr_id": 103, "title": "Melhorar a performance de carregamento do dashboard em 30%", "description": "O tempo médio atual de carregamento (LCP) é de 3,5 segundos; a meta é atingir 2,45 segundos para otimizar a experiência do usuário final.", "initial_value": 3.5, "goal_value": 2.45, "current_value": 2.45, "unit": "segundos", "limit_date": "2026-06-30T23:59:59Z", "last_updated": "2026-05-01T15:20:00Z" },
+#         { "id": 204, "okr_id": 102, "title": "Reduzir o tempo médio de primeira resposta (FRT) em 20%", "description": "Atualmente, o suporte leva em média 5 horas para o primeiro contato; a meta é reduzir para 4 horas através da automação de triagem.", "initial_value": 5.0, "goal_value": 4.0, "current_value": 4.8, "unit": "horas", "limit_date": "2026-06-30T23:59:59Z", "last_updated": "2026-05-01T15:20:00Z" }
+#       ],
+#       "Metrics_History": [
+#         { "id": 9010, "target_id": 201, "type": "KR", "captured_value": 10.0, "recorded_at": "2026-01-10T09:00:00Z" },
+#         { "id": 9011, "target_id": 201, "type": "KR", "captured_value": 12.0, "recorded_at": "2026-03-15T14:00:00Z" },
+#         { "id": 9012, "target_id": 201, "type": "KR", "captured_value": 14.0, "recorded_at": "2026-05-01T15:20:00Z" },
+#         { "id": 9013, "target_id": 202, "type": "KR", "captured_value": 20.0, "recorded_at": "2026-01-10T09:00:00Z" },
+#         { "id": 9014, "target_id": 202, "type": "KR", "captured_value": 19.0, "recorded_at": "2026-05-01T15:20:00Z" },
+#         { "id": 9015, "target_id": 203, "type": "KR", "captured_value": 3.5, "recorded_at": "2026-01-10T09:00:00Z" },
+#         { "id": 9016, "target_id": 203, "type": "KR", "captured_value": 2.45, "recorded_at": "2026-05-01T15:20:00Z" },
+#         { "id": 9017, "target_id": 204, "type": "KR", "captured_value": 5.0, "recorded_at": "2026-01-10T09:00:00Z" },
+#         { "id": 9018, "target_id": 204, "type": "KR", "captured_value": 4.8, "recorded_at": "2026-05-01T15:20:00Z" }
+#       ]
+#     }
+#   }
+# ]
 
-    print("\n" + "="*50)
-    print("INICIANDO MOTOR DE INTELIGÊNCIA EXECUTIVA")
-    print("="*50 + "\n")
+#     print("\n" + "="*50)
+#     print("INICIANDO MOTOR DE INTELIGÊNCIA EXECUTIVA")
+#     print("="*50 + "\n")
 
-    # A variável 'saida_json_string' agora guarda a resposta da nossa API
-    saida_json_string = executar_motor_inteligencia(json_inicial_simulado)
+#     # A variável 'saida_json_string' agora guarda a resposta da nossa API
+#     saida_json_string = executar_motor_inteligencia(json_inicial_simulado)
     
-    # Vamos tratar o print apenas para não poluir o terminal com os milhares de caracteres do Base64
-    saida_dict = json.loads(saida_json_string)
-    if saida_dict["status"] == "sucesso":
-        # Trunca o base64 só para exibição na tela
-        preview_base64 = saida_dict["pdf_base64"][:150] + "... [TRUNCADO PARA LEITURA] ..."
-        saida_dict["pdf_base64"] = preview_base64
+#     # Vamos tratar o print apenas para não poluir o terminal com os milhares de caracteres do Base64
+#     saida_dict = json.loads(saida_json_string)
+#     if saida_dict["status"] == "sucesso":
+#         # Trunca o base64 só para exibição na tela
+#         preview_base64 = saida_dict["pdf_base64"][:150] + "... [TRUNCADO PARA LEITURA] ..."
+#         saida_dict["pdf_base64"] = preview_base64
         
-    print("\n" + "="*50)
-    print("SAÍDA DO SISTEMA (JSON DE RESPOSTA):")
-    print("="*50)
-    print(json.dumps(saida_dict, ensure_ascii=False, indent=4))
+#     print("\n" + "="*50)
+#     print("SAÍDA DO SISTEMA (JSON DE RESPOSTA):")
+#     print("="*50)
+#     print(json.dumps(saida_dict, ensure_ascii=False, indent=4))

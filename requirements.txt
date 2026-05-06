@@ -11,3 +11,6 @@ google-generativeai>=0.5.2
 
 Markdown==3.10.2
 fpdf2>=2.7.9
+
+uvicorn== 0.46.0
+fastapi== 0.136.1
